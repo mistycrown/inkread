@@ -6,6 +6,7 @@ import { testWebDavConnection, uploadData, downloadData } from '../services/webd
 import { testOpenAIConnection } from '../services/aiService';
 import { AppSettings, PromptTemplate } from '../types';
 import { SketchButton, SketchInput, SketchTextArea } from '../components/SketchComponents';
+import { Toast, ConfirmDialog } from '../components/Notifications';
 
 // Simple UUID
 const uuid = () => crypto.randomUUID();
@@ -36,6 +37,10 @@ export const Settings: React.FC = () => {
     const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | null>(null);
     const [isEditMode, setIsEditMode] = useState(false);
 
+    // UI Feedback State
+    const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+    const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
+
     useEffect(() => {
         setFormData(getSettings());
     }, []);
@@ -46,8 +51,8 @@ export const Settings: React.FC = () => {
 
     const handleSave = () => {
         saveSettings(formData);
-        alert("Settings saved!");
-        navigate('/');
+        setToast({ message: "Settings saved!", type: 'success' });
+        setTimeout(() => navigate('/'), 1000);
     };
 
     const handleTestConnection = async () => {
@@ -138,9 +143,14 @@ export const Settings: React.FC = () => {
     };
 
     const handleDeleteTemplate = (id: string) => {
-        if (!confirm("Remove this template?")) return;
-        const updated = formData.prompt_templates.filter(t => t.id !== id);
+        setTemplateToDelete(id);
+    };
+
+    const confirmDeleteTemplate = () => {
+        if (!templateToDelete) return;
+        const updated = formData.prompt_templates.filter(t => t.id !== templateToDelete);
         setFormData({ ...formData, prompt_templates: updated });
+        setTemplateToDelete(null);
     };
 
     const saveTemplateEdit = () => {
@@ -189,11 +199,11 @@ export const Settings: React.FC = () => {
             try {
                 const content = event.target?.result as string;
                 const msg = await restoreBackup(content);
-                alert(msg);
+                setToast({ message: msg, type: 'success' });
                 // Refresh Settings in state in case they were updated
                 setFormData(getSettings());
             } catch (err: any) {
-                alert(err.message);
+                setToast({ message: err.message, type: 'error' });
             }
         };
         reader.readAsText(file);
@@ -475,6 +485,27 @@ export const Settings: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Toast Notification */}
+            {toast && (
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
+            )}
+
+            {/* Confirm Dialog */}
+            {templateToDelete && (
+                <ConfirmDialog
+                    title="Remove Template?"
+                    message="This action cannot be undone."
+                    confirmText="Remove"
+                    cancelText="Cancel"
+                    onConfirm={confirmDeleteTemplate}
+                    onCancel={() => setTemplateToDelete(null)}
+                />
+            )}
         </div>
     );
 };

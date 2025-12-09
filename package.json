@@ -15,8 +15,11 @@
   "dependencies": {
     "@awesome-cordova-plugins/http": "^8.1.0",
     "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
     "@capacitor/cli": "^8.0.0",
+    "@capacitor/clipboard": "^8.0.0",
     "@capacitor/core": "^8.0.0",
+    "@capacitor/status-bar": "^8.0.0",
     "@google/genai": "^1.31.0",
     "cordova-plugin-advanced-http": "^3.3.1",
     "cordova-plugin-file": "^8.1.3",

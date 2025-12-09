@@ -294,13 +294,20 @@ export const syncData = async (): Promise<string> => {
     const cloudData = JSON.parse(cloudBackupStr);
     const cloudTimestamp = cloudData.timestamp || 0;
 
+    console.log(`[Sync Debug] Local: ${localTimestamp} (${new Date(localTimestamp).toLocaleString()})`);
+    console.log(`[Sync Debug] Cloud: ${cloudTimestamp} (${new Date(cloudTimestamp).toLocaleString()})`);
+    console.log(`[Sync Debug] Delta: ${localTimestamp - cloudTimestamp}ms`);
+
     if (localTimestamp > cloudTimestamp) {
+      console.log('[Sync Debug] Local is newer -> Uploading');
       await client.putFile('inkread_data.json', localBackup);
       return "上传完成";
     } else if (localTimestamp < cloudTimestamp) {
+      console.log('[Sync Debug] Cloud is newer -> Downloading');
       await restoreBackup(cloudBackupStr);
       return "下载完成";
     } else {
+      console.log('[Sync Debug] Timestamps match -> No action');
       return "已是最新";
     }
   } catch (error: any) {

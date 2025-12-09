@@ -1,7 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getIndex, saveArticle, searchLocalArticles } from '../services/storageService';
+import { Clipboard } from '@capacitor/clipboard';
+import { Capacitor } from '@capacitor/core';
+import { getIndex, saveArticle, searchLocalArticles, toggleArticleStatus } from '../services/storageService';
 import { syncData } from '../services/webdavService';
 import { IndexItem, SyncStatus } from '../types';
 import { SketchButton, SketchCard, SketchInput, SketchTextArea } from '../components/SketchComponents';
@@ -41,7 +43,17 @@ export const Home: React.FC = () => {
 
     useEffect(() => {
         loadItems();
-        // Auto sync on mount could go here
+
+        const handleDataUpdate = () => {
+            console.log('[Home] Data updated event received, reloading...');
+            loadItems();
+        };
+
+        window.addEventListener('inkread_data_updated', handleDataUpdate);
+
+        return () => {
+            window.removeEventListener('inkread_data_updated', handleDataUpdate);
+        };
     }, []);
 
     // Compute Recent Tags for Warehouse Mode
@@ -183,6 +195,15 @@ export const Home: React.FC = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    const handleQuickArchive = (e: React.MouseEvent, item: IndexItem) => {
+        e.stopPropagation(); // 阻止卡片点击跳转
+        const newStatus = item.status === 'inbox' ? 'archived' : 'inbox';
+        toggleArticleStatus(item.id, newStatus);
+
+        // 乐观更新 UI (或者重新加载)
+        loadItems();
+    };
+
     return (
         <div className="fixed inset-0 w-full h-full bg-[#F8F5E6] overflow-y-auto">
             <div className="flex flex-col max-w-2xl mx-auto p-4 space-y-6 pb-8 min-h-full">
@@ -209,10 +230,10 @@ export const Home: React.FC = () => {
                 {/* Sync Status Message */}
                 {syncMessage && (
                     <div className={`mx-4 -mt-2 p-3 rounded-sm border-2 animate-in fade-in slide-in-from-top ${syncStatus === SyncStatus.SUCCESS
-                            ? 'bg-green-50 border-green-200 text-green-700'
-                            : syncStatus === SyncStatus.ERROR
-                                ? 'bg-red-50 border-red-200 text-red-600'
-                                : 'bg-blue-50 border-blue-200 text-blue-700'
+                        ? 'bg-green-50 border-green-200 text-green-700'
+                        : syncStatus === SyncStatus.ERROR
+                            ? 'bg-red-50 border-red-200 text-red-600'
+                            : 'bg-blue-50 border-blue-200 text-blue-700'
                         }`}>
                         <div className="flex items-center gap-2">
                             {syncStatus === SyncStatus.SUCCESS && (
@@ -320,41 +341,32 @@ export const Home: React.FC = () => {
                     ) : (
                         <>
                             {paginatedItems.map(item => (
-                                <SketchCard key={item.id} onClick={() => navigate(`/article/${item.id}`)} className="group">
-                                    <div className="flex justify-between items-start mb-2">
+                                <SketchCard key={item.id} onClick={() => navigate(`/article/${item.id}`)} className="group cursor-pointer">
+                                    <div className="flex items-center justify-between mb-2">
                                         <div className="flex items-center gap-2">
                                             <span className="font-hand text-xs bg-zinc-200 px-2 py-1 rounded-sm border border-zinc-400">
-                                                {new Date(item.created_at).toLocaleDateString()}
+                                                {new Date(item.updated_at || item.created_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
                                             </span>
                                             {item.source && (
-                                                <span className="text-[10px] font-bold bg-zinc-800 text-[#FFDE59] px-2 py-0.5 rounded-sm uppercase tracking-wide transform -rotate-2 group-hover:rotate-0 transition-transform">
+                                                <span className="text-[10px] font-bold bg-zinc-800 text-[#FFDE59] px-2 py-0.5 rounded-sm uppercase tracking-wide transform -rotate-1">
                                                     {item.source}
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            {item.link && (
-                                                <a
-                                                    href={item.link}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="text-zinc-400 hover:text-blue-600 transition-colors"
-                                                    title="Open Link"
-                                                >
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-                                                </a>
+                                        {/* 快速归档/恢复按钮 */}
+                                        <button
+                                            onClick={(e) => handleQuickArchive(e, item)}
+                                            className="p-1.5 rounded-full hover:bg-zinc-200 text-zinc-400 hover:text-zinc-800 transition-colors"
+                                            title={item.status === 'inbox' ? "Archive" : "Move to Inbox"}
+                                        >
+                                            {item.status === 'inbox' ? (
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="5" x="2" y="3" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></svg>
+                                            ) : (
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4" /><path d="M20 20v-7a4 4 0 0 0-4-4H4" /></svg>
                                             )}
-                                            {item.tags.length > 0 && (
-                                                <div className="flex gap-1 flex-wrap justify-end">
-                                                    {item.tags.slice(0, 3).map(tag => (
-                                                        <span key={tag} className="text-[10px] uppercase tracking-wider text-zinc-500">#{tag}</span>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
+                                        </button>
                                     </div>
-                                    <p className="line-clamp-3 leading-relaxed text-zinc-700">
+                                    <p className="line-clamp-2 leading-relaxed text-zinc-700 font-medium">
                                         {item.preview_text}
                                     </p>
                                 </SketchCard>

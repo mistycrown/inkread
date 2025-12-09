@@ -4,6 +4,7 @@ import { getArticle, saveArticle, deleteArticle, getSettings, toggleArticleStatu
 import { analyzeText } from '../services/aiService';
 import { ArticleDetail, AIStructuredData, IndexItem, AppSettings, PromptTemplate } from '../types';
 import { SketchButton, SketchInput, SketchSelect, LoadingSpinner, SketchMarkdown } from '../components/SketchComponents';
+import { ConfirmDialog } from '../components/Notifications';
 
 const TabButton: React.FC<{ active: boolean, onClick: () => void, children: React.ReactNode }> = ({ active, onClick, children }) => (
   <button
@@ -24,6 +25,9 @@ export const Detail: React.FC = () => {
   const [noteEdit, setNoteEdit] = useState('');
   const [isNotePreview, setIsNotePreview] = useState(false); // Toggle for Note Preview
   const [aiError, setAiError] = useState<string | null>(null);
+
+  // Dialog State
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Template State
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
@@ -64,10 +68,13 @@ export const Detail: React.FC = () => {
   };
 
   const handleDelete = () => {
-    if (confirm("Are you sure you want to crumple this up and throw it away?")) {
-      if (article) deleteArticle(article.id);
-      navigate('/');
-    }
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = () => {
+    if (article) deleteArticle(article.id);
+    setShowDeleteConfirm(false);
+    navigate('/');
   };
 
   const handleToggleArchive = () => {
@@ -296,6 +303,17 @@ export const Detail: React.FC = () => {
           )}
         </div>
       </div>
+
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title="Delete Scrap?"
+          message="Are you sure you want to crumple this up and throw it away?"
+          confirmText="Yes, Throw it"
+          cancelText="Keep it"
+          onConfirm={confirmDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </div>
   );
 };
