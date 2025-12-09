@@ -1,39 +1,57 @@
 <!DOCTYPE html>
 <html lang="en" class="bg-[#F8F5E6]">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>InkRead</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&display=swap" rel="stylesheet">
-    <style>
-      html, body {
-        background-color: #F8F5E6; /* Paper color */
-        min-height: 100vh;
-        margin: 0;
-        padding: 0;
-      }
-      body {
-        font-family: 'Merriweather', serif;
-        color: #333;
-      }
-      .font-hand {
-        font-family: 'Patrick Hand', cursive;
-      }
-      /* Custom Scrollbar for that rough feel */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #F8F5E6; 
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #444; 
-        border-radius: 4px;
-      }
-    </style>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InkRead</title>
+  <link rel="icon" type="image/png" href="/icon.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&display=swap"
+    rel="stylesheet">
+  <style>
+    @font-face {
+      font-family: 'Patrick Hand';
+      src: url('/fonts/PatrickHand-Regular.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    html,
+    body {
+      background-color: #F8F5E6;
+      /* Paper color */
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Merriweather', serif;
+      color: #333;
+    }
+
+    .font-hand {
+      font-family: 'Patrick Hand', cursive;
+    }
+
+    /* Custom Scrollbar for that rough feel */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #F8F5E6;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #444;
+      border-radius: 4px;
+    }
+  </style>
   <script type="importmap">
 {
   "imports": {
@@ -46,10 +64,12 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
+  <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-[#F8F5E6] min-h-screen">
-    <div id="root"></div>
+
+<body class="bg-[#F8F5E6] min-h-screen">
+  <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
 </body>
+
 </html>

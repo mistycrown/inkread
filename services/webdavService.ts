@@ -12,7 +12,18 @@ export class WebDavClient {
     if (!settings.webdav_url || !settings.webdav_user || !settings.webdav_password) {
       throw new Error("Missing WebDAV configuration");
     }
-    this.url = settings.webdav_url.replace(/\/$/, ''); // Remove trailing slash
+
+    // 在开发环境使用代理避免 CORS 问题
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    if (isDev) {
+      // 使用本地代理路径
+      this.url = '/webdav-proxy' + new URL(settings.webdav_url).pathname.replace(/\/$/, '');
+    } else {
+      // 生产环境直接使用配置的 URL
+      this.url = settings.webdav_url.replace(/\/$/, '');
+    }
+
     this.headers = {
       'Authorization': `Basic ${toBase64(`${settings.webdav_user}:${settings.webdav_password}`)}`,
     };
@@ -25,8 +36,8 @@ export class WebDavClient {
       const response = await fetch(`${this.url}/`, {
         method: 'PROPFIND', // Standard WebDAV method to check existence/properties
         headers: {
-            ...this.headers,
-            'Depth': '0' // Header to only check the target resource, not children
+          ...this.headers,
+          'Depth': '0' // Header to only check the target resource, not children
         },
       });
 
@@ -35,15 +46,15 @@ export class WebDavClient {
       // 401 means Unauthorized (failed auth).
       if (response.status === 401) throw new Error("Unauthorized: Check username/password");
       if (response.status === 404) throw new Error("URL not found");
-      
+
       // If PROPFIND fails, try a simple GET on a likely file (index.json) or just check if auth passed
       if (!response.ok && response.status !== 207) {
-          // Fallback check
-          const getRes = await fetch(`${this.url}/index.json`, { method: 'HEAD', headers: this.headers });
-          if (getRes.status === 401) throw new Error("Unauthorized");
-          // If 404, it might just mean file doesn't exist yet, but connection is OK if not 401
+        // Fallback check
+        const getRes = await fetch(`${this.url}/index.json`, { method: 'HEAD', headers: this.headers });
+        if (getRes.status === 401) throw new Error("Unauthorized");
+        // If 404, it might just mean file doesn't exist yet, but connection is OK if not 401
       }
-      
+
       return true;
     } catch (e: any) {
       console.error("WebDAV Test Error", e);
@@ -60,7 +71,7 @@ export class WebDavClient {
 
       if (response.status === 404) return null;
       if (!response.ok) throw new Error(`WebDAV GET failed: ${response.statusText}`);
-      
+
       return await response.text();
     } catch (e) {
       console.error(`Error reading ${filename}`, e);
@@ -88,13 +99,13 @@ export class WebDavClient {
 }
 
 export const testWebDavConnection = async (settings: AppSettings): Promise<string> => {
-    try {
-        const client = new WebDavClient(settings);
-        await client.testConnection();
-        return "Connection Successful!";
-    } catch (error: any) {
-        return `Connection Failed: ${error.message}`;
-    }
+  try {
+    const client = new WebDavClient(settings);
+    await client.testConnection();
+    return "Connection Successful!";
+  } catch (error: any) {
+    return `Connection Failed: ${error.message}`;
+  }
 };
 
 export const syncData = async (): Promise<string> => {
@@ -171,7 +182,7 @@ export const syncData = async (): Promise<string> => {
         updateMergedIndex(cloudItem);
       } else {
         // Equal - ensure merged has one of them
-        updateMergedIndex(localItem); 
+        updateMergedIndex(localItem);
       }
     }
   }
