@@ -273,8 +273,8 @@ export const downloadData = async (): Promise<string> => {
     try {
       const cloudData = await downloadDataFromSupabase(settings);
       if (!cloudData) return "No data in Supabase";
-      await restoreBackup(cloudData);
-      return "Supabase Download Success";
+      const restoreMsg = await restoreBackup(cloudData);
+      return `Supabase Download: ${restoreMsg}`;
     } catch (e: any) {
       return `Supabase Download Failed: ${e.message}`;
     }
@@ -349,7 +349,8 @@ export const syncData = async (): Promise<string> => {
         await restoreBackup(cloudBackupStr);
         return "Sync: Downloaded (Cloud newer)";
       } else {
-        return "Sync: Already up to date";
+        const diff = Math.round((localTimestamp - cloudTimestamp) / 1000);
+        return `Synced (Diff: ${diff}s)`;
       }
     } catch (e: any) {
       return `Sync Error: ${e.message}`;

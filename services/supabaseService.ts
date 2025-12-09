@@ -11,7 +11,12 @@ const getSupabase = (settings: AppSettings) => {
     if (!settings.supabase_url || !settings.supabase_key) {
         throw new Error("Missing Supabase URL or Key");
     }
-    return createClient(settings.supabase_url, settings.supabase_key);
+    return createClient(settings.supabase_url, settings.supabase_key, {
+        global: {
+            // Force no-cache for all requests to ensure fresh data
+            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
+        }
+    });
 };
 
 export const testSupabaseConnection = async (settings: AppSettings): Promise<string> => {
@@ -37,22 +42,37 @@ export const testSupabaseConnection = async (settings: AppSettings): Promise<str
             });
 
         if (uploadError) {
-            // If upload failed, AND we couldn't see the bucket in the list, then it's likely missing or configured wrong.
+            // ... (keep existing error handling for upload)
             if (!bucketFoundInList) {
                 if (uploadError.message.includes('row-level security')) {
                     return `Write Failed: RLS Policy Error. Check INSERT/UPDATE policies for 'anon'.`;
                 }
-                // If upload failed and we can't see it, assume it's not accessible/existent
                 return `Connection Failed: Could not access bucket '${BUCKET_NAME}'. (Error: ${uploadError.message})`;
             }
 
             return `Write Failed: ${uploadError.message}`;
         }
 
-        // 3. Cleanup
+        // 3. Read Permission Check (New!)
+        // Upload worked, now verify we can READ it back (SELECT policy).
+        const { error: downloadError } = await supabase.storage
+            .from(BUCKET_NAME)
+            .download(testFileName);
+
+        if (downloadError) {
+            // Cleanup if possible, though read failed so we might not wait
+            await supabase.storage.from(BUCKET_NAME).remove([testFileName]);
+
+            if (downloadError.message.includes('row-level security') || downloadError.message.includes('Object not found')) {
+                return `Read Failed: RLS Policy Error. Check SELECT policy for 'anon' role.`;
+            }
+            return `Read Failed: ${downloadError.message}`;
+        }
+
+        // 4. Cleanup
         await supabase.storage.from(BUCKET_NAME).remove([testFileName]);
 
-        return "Connection & Write Permissions Verified!";
+        return "Connection, Write & Read Verified!";
     } catch (e: any) {
         return `Connection Failed: ${e.message}`;
     }
@@ -69,6 +89,7 @@ export const uploadDataToSupabase = async (settings: AppSettings): Promise<strin
         const { error } = await supabase.storage
             .from(BUCKET_NAME)
             .upload(FILE_NAME, blob, {
+                cacheControl: '0',
                 upsert: true,
                 contentType: 'application/json'
             });

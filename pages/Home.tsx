@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Clipboard } from '@capacitor/clipboard';
 import { Capacitor } from '@capacitor/core';
@@ -125,9 +125,20 @@ export const Home: React.FC = () => {
     };
 
 
+    // Refs for duplicate detection
+    const lastClipboardRef = useRef<string>('');
+    const latestItemsRef = useRef<IndexItem[]>([]);
+
+    // Keep items ref in sync
+    useEffect(() => {
+        latestItemsRef.current = allItems;
+    }, [allItems]);
 
     // Auto-read Clipboard on Resume
     useEffect(() => {
+        // Disable auto-check on Web to avoid permission errors/annoyance
+        if (!Capacitor.isNativePlatform()) return;
+
         let listenerHandle: any = null;
 
         const setupListener = async () => {
@@ -140,8 +151,10 @@ export const Home: React.FC = () => {
         };
 
         setupListener();
-        // Also check once on mount (for cold start), slightly delayed to ensure ready
-        setTimeout(checkClipboardAndPrompt, 1000);
+        // Check once on mount (Android only), slightly delayed
+        if (Capacitor.getPlatform() === 'android') {
+            setTimeout(checkClipboardAndPrompt, 1000);
+        }
 
         return () => {
             if (listenerHandle) {
@@ -151,45 +164,61 @@ export const Home: React.FC = () => {
     }, []);
 
     const checkClipboardAndPrompt = async () => {
+        // Double check platform (redundant but safe)
+        if (!Capacitor.isNativePlatform()) return;
+
         try {
-            // Priority: Capacitor Plugin -> Web API
             let text = '';
             try {
+                // Native read
                 const { value } = await Clipboard.read();
-                text = value;
+                text = value || '';
             } catch (nativeErr) {
-                // Fallback to web (might fail without user gesture)
-                /* Web API usually requires focus/gesture, so silent read might fail here. 
-                   We ignore error in silent mode. */
+                // Silent fail on auto-check
+                return;
             }
 
-            if (text && text.trim().length > 0) {
-                // Logic to avoid annoying user:
-                // Only open if we are NOT already editing
-                // We can also check if text is significantly different or new?
-                // For now, let's just pre-fill if ManualMode is OFF.
+            if (!text || !text.trim()) return;
 
-                // Note: We need to access the LATEST state value of isManualMode.
-                // Since we are in a closure, we might need a ref or functional update.
-                // Simpler approach: Just check if we are already in manual mode? 
-                // Actually, let's interact with state carefully.
+            // --- DUPLICATE DETECTION ---
 
-                setManualContent((prev) => {
-                    // Only update if empty or override? 
-                    // Let's simply set it and prompt user.
-                    if (!prev) return text;
-                    return prev;
-                });
-                setIsManualMode((prev) => {
-                    if (!prev) {
-                        // If modal was closed, open it with new text
-                        // We might want a "New Content Detected" toast instead?
-                        // The user requested "Auto Read". Opening the modal is a good feedback.
-                        return true;
-                    }
-                    return prev;
-                });
+            // 1. Check against last rejected/accepted clipboard session
+            if (text === lastClipboardRef.current) {
+                console.log("Clipboard content matches last check, ignoring.");
+                return;
             }
+
+            // 2. Check against the very last saved item (first in list)
+            // This prevents the loop: Copy -> Save -> Switch App -> Return -> "New Clip Found!" (Self)
+            const lastSavedItem = latestItemsRef.current[0];
+            if (lastSavedItem) {
+                // We don't have the full raw_text of the item here, only preview.
+                // Ideally we check ID or full content. 
+                // But simply checking if the preview is similar might be enough?
+                // Wait, we can't easily check against full DB content without loading.
+                // COMPROMISE: We assume if the user just saved it, it's in their head.
+                // Actually, let's just rely on lastClipboardRef. 
+                // When user SAVES a scrap, we should update lastClipboardRef.
+            }
+
+            // Update ref so we don't prompt again for this specific text
+            lastClipboardRef.current = text;
+
+            // Logic to avoid annoying user: 
+            // Only prompts if we found something NEW (passed checks above).
+
+            setManualContent((prev) => {
+                if (!prev) return text;
+                return prev;
+            });
+            setIsManualMode((prev) => {
+                if (!prev) {
+                    setToast({ message: "New clipboard content detected", type: 'info' });
+                    return true;
+                }
+                return prev;
+            });
+
         } catch (err) {
             console.log('Silent clipboard check failed', err);
         }
@@ -229,6 +258,9 @@ export const Home: React.FC = () => {
             console.log("Clipboard text:", text);
 
             if (text && text.trim().length > 0) {
+                // Check duplicate before saving? optional.
+                lastClipboardRef.current = text; // Update ref to prevent re-prompting on resume
+
                 // Success
                 createEntry(text);
                 setToast({ message: "Scrap created from clipboard!", type: 'success' });
