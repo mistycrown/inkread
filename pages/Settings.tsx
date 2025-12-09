@@ -51,7 +51,7 @@ export const Settings: React.FC = () => {
         setTestResult(null);
         try {
             const msg = await testWebDavConnection(formData);
-            if (msg.includes("Successful")) {
+            if (msg.includes("成功")) {
                 setTestResult({ msg, isError: false });
             } else {
                 setTestResult({ msg, isError: true });

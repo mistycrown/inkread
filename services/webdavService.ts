@@ -1,4 +1,4 @@
-import { getSettings, getIndex, saveIndex, rawReadFile, rawWriteFile, getAllArticleFiles } from './storageService';
+import { getSettings, getIndex, saveIndex, rawReadFile, rawWriteFile, getAllArticleFiles, createBackup, restoreBackup } from './storageService';
 import { IndexFile, AppSettings } from '../types';
 
 // Simple Buffer for Basic Auth encoding in browser
@@ -50,7 +50,7 @@ export class WebDavClient {
       // If PROPFIND fails, try a simple GET on a likely file (index.json) or just check if auth passed
       if (!response.ok && response.status !== 207) {
         // Fallback check
-        const getRes = await fetch(`${this.url}/index.json`, { method: 'HEAD', headers: this.headers });
+        const getRes = await fetch(`${this.url}/inkread_data.json`, { method: 'HEAD', headers: this.headers });
         if (getRes.status === 401) throw new Error("Unauthorized");
         // If 404, it might just mean file doesn't exist yet, but connection is OK if not 401
       }
@@ -102,99 +102,51 @@ export const testWebDavConnection = async (settings: AppSettings): Promise<strin
   try {
     const client = new WebDavClient(settings);
     await client.testConnection();
-    return "Connection Successful!";
+    return "连接成功！";
   } catch (error: any) {
-    return `Connection Failed: ${error.message}`;
+    return `连接失败: ${error.message}`;
   }
 };
 
 export const syncData = async (): Promise<string> => {
   const settings = getSettings();
-  if (!settings.webdav_url) return "No WebDAV configured";
+  if (!settings.webdav_url) return "未配置 WebDAV";
 
   const client = new WebDavClient(settings);
-  const localIndex = getIndex();
 
-  // 1. Get Remote Index
-  let cloudIndexStr;
+  // 获取本地完整数据
+  const localBackup = createBackup();
+  const localData = JSON.parse(localBackup);
+  const localTimestamp = localData.timestamp;
+
+  // 1. 尝试获取云端数据
+  let cloudBackupStr: string | null = null;
   try {
-    cloudIndexStr = await client.getFile('index.json');
+    cloudBackupStr = await client.getFile('inkread_data.json');
   } catch (e) {
-    return "Connection Failed";
+    return "连接失败";
   }
 
-  // 1a. If remote doesn't exist, upload everything (First Sync)
-  if (!cloudIndexStr) {
-    await client.putFile('index.json', JSON.stringify(localIndex));
-    const allFiles = getAllArticleFiles();
-    for (const file of allFiles) {
-      const content = rawReadFile(file);
-      if (content) await client.putFile(file, content);
-    }
-    return "Initial Upload Complete";
+  // 2. 如果云端没有数据，直接上传
+  if (!cloudBackupStr) {
+    await client.putFile('inkread_data.json', localBackup);
+    return "首次上传完成";
   }
 
-  const cloudIndex: IndexFile = JSON.parse(cloudIndexStr);
+  // 3. 比较时间戳，决定上传还是下载
+  const cloudData = JSON.parse(cloudBackupStr);
+  const cloudTimestamp = cloudData.timestamp || 0;
 
-  // 2. Compare & Sync
-  const allIds = new Set([
-    ...localIndex.items.map(i => i.id),
-    ...cloudIndex.items.map(i => i.id)
-  ]);
-
-  const mergedItems = [...localIndex.items];
-
-  // Helper to update merged list
-  const updateMergedIndex = (item: any) => {
-    const idx = mergedItems.findIndex(i => i.id === item.id);
-    if (idx > -1) mergedItems[idx] = item;
-    else mergedItems.push(item);
-  };
-
-  for (const id of allIds) {
-    const localItem = localIndex.items.find(i => i.id === id);
-    const cloudItem = cloudIndex.items.find(i => i.id === id);
-    const filename = `${id}.json`;
-
-    // Case A: Only Local
-    if (localItem && !cloudItem) {
-      const content = rawReadFile(filename);
-      if (content) await client.putFile(filename, content);
-      // It remains in mergedItems by default
-    }
-    // Case B: Only Cloud
-    else if (!localItem && cloudItem) {
-      const content = await client.getFile(filename);
-      if (content) rawWriteFile(filename, content);
-      updateMergedIndex(cloudItem);
-    }
-    // Case C: Both Exist
-    else if (localItem && cloudItem) {
-      if (localItem.updated_at > cloudItem.updated_at) {
-        // Local is newer -> Upload
-        const content = rawReadFile(filename);
-        if (content) await client.putFile(filename, content);
-        updateMergedIndex(localItem);
-      } else if (localItem.updated_at < cloudItem.updated_at) {
-        // Cloud is newer -> Download
-        const content = await client.getFile(filename);
-        if (content) rawWriteFile(filename, content);
-        updateMergedIndex(cloudItem);
-      } else {
-        // Equal - ensure merged has one of them
-        updateMergedIndex(localItem);
-      }
-    }
+  if (localTimestamp > cloudTimestamp) {
+    // 本地更新，上传到云端
+    await client.putFile('inkread_data.json', localBackup);
+    return "上传完成";
+  } else if (localTimestamp < cloudTimestamp) {
+    // 云端更新，下载并合并
+    await restoreBackup(cloudBackupStr);
+    return "下载完成";
+  } else {
+    // 时间戳相同，无需同步
+    return "已是最新";
   }
-
-  // 3. Finalize
-  const newIndexFile: IndexFile = {
-    last_sync_time: Date.now(),
-    items: mergedItems.sort((a, b) => b.created_at - a.created_at) // Sort by newest
-  };
-
-  saveIndex(newIndexFile);
-  await client.putFile('index.json', JSON.stringify(newIndexFile));
-
-  return "Sync Complete";
 };
