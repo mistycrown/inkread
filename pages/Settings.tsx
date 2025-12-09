@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSettings, saveSettings, createBackup, restoreBackup } from '../services/storageService';
-import { testWebDavConnection } from '../services/webdavService';
+import { testWebDavConnection, uploadData, downloadData } from '../services/webdavService';
 import { testOpenAIConnection } from '../services/aiService';
 import { AppSettings, PromptTemplate } from '../types';
 import { SketchButton, SketchInput, SketchTextArea } from '../components/SketchComponents';
@@ -27,6 +27,10 @@ export const Settings: React.FC = () => {
 
     const [aiTestResult, setAiTestResult] = useState<{ msg: string, isError: boolean } | null>(null);
     const [isAiTesting, setIsAiTesting] = useState(false);
+
+    const [syncResult, setSyncResult] = useState<{ msg: string, isError: boolean } | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
 
     // Template Editing State
     const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | null>(null);
@@ -73,6 +77,48 @@ export const Settings: React.FC = () => {
             setAiTestResult({ msg: e.message || "Connection Error", isError: true });
         } finally {
             setIsAiTesting(false);
+        }
+    };
+
+    const handleUpload = async () => {
+        // 先保存当前设置
+        saveSettings(formData);
+
+        setIsUploading(true);
+        setSyncResult(null);
+        try {
+            const msg = await uploadData();
+            if (msg.includes("成功")) {
+                setSyncResult({ msg, isError: false });
+            } else {
+                setSyncResult({ msg, isError: true });
+            }
+        } catch (e: any) {
+            setSyncResult({ msg: e.message || "上传错误", isError: true });
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleDownload = async () => {
+        // 先保存当前设置
+        saveSettings(formData);
+
+        setIsDownloading(true);
+        setSyncResult(null);
+        try {
+            const msg = await downloadData();
+            if (msg.includes("成功")) {
+                setSyncResult({ msg, isError: false });
+                // 下载成功后刷新页面以显示新数据
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                setSyncResult({ msg, isError: true });
+            }
+        } catch (e: any) {
+            setSyncResult({ msg: e.message || "下载错误", isError: true });
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -220,6 +266,44 @@ export const Settings: React.FC = () => {
                                         <p className="break-words leading-relaxed opacity-90">{testResult.msg}</p>
                                     </div>
                                 )}
+                            </div>
+
+                            <div className="border-t border-zinc-300 my-4"></div>
+
+                            <div className="space-y-3">
+                                <h3 className="font-hand text-zinc-600 font-bold">手动同步</h3>
+                                <div className="flex gap-2">
+                                    <SketchButton
+                                        variant="secondary"
+                                        onClick={handleUpload}
+                                        disabled={isUploading || isDownloading}
+                                        className="flex-1 text-sm py-2"
+                                    >
+                                        {isUploading ? "上传中..." : "⬆️ 上传到云端"}
+                                    </SketchButton>
+                                    <SketchButton
+                                        variant="secondary"
+                                        onClick={handleDownload}
+                                        disabled={isUploading || isDownloading}
+                                        className="flex-1 text-sm py-2"
+                                    >
+                                        {isDownloading ? "下载中..." : "⬇️ 从云端下载"}
+                                    </SketchButton>
+                                </div>
+                                {syncResult && (
+                                    <div className={`text-sm p-3 rounded-sm border-2 ${syncResult.isError ? 'bg-red-50 border-red-200 text-red-600' : 'bg-green-50 border-green-200 text-green-700'} animate-in fade-in slide-in-from-top-1`}>
+                                        <div className="font-bold mb-1 flex items-center gap-2">
+                                            {syncResult.isError ? (
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>
+                                            ) : (
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                            )}
+                                            {syncResult.isError ? '同步失败' : '同步成功'}
+                                        </div>
+                                        <p className="break-words leading-relaxed opacity-90">{syncResult.msg}</p>
+                                    </div>
+                                )}
+                                <p className="text-xs text-zinc-400">上传：将本地数据强制覆盖到云端 | 下载：用云端数据覆盖本地</p>
                             </div>
                         </div>
                     </section>

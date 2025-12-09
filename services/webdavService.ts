@@ -27,6 +27,15 @@ export class WebDavClient {
     this.headers = {
       'Authorization': `Basic ${toBase64(`${settings.webdav_user}:${settings.webdav_password}`)}`,
     };
+
+    // 调试信息
+    console.log('WebDAV Client 初始化:', {
+      '原始URL': settings.webdav_url,
+      '实际URL': this.url,
+      '用户名': settings.webdav_user,
+      '是否开发环境': isDev,
+      'Authorization头': this.headers.Authorization
+    });
   }
 
   async testConnection(): Promise<boolean> {
@@ -34,11 +43,12 @@ export class WebDavClient {
       // Try to list the directory or get index.json
       // Using PROPFIND method usually checks directory access, but GET on root or index is safer for simple check
       const response = await fetch(`${this.url}/`, {
-        method: 'PROPFIND', // Standard WebDAV method to check existence/properties
+        method: 'PROPFIND',
         headers: {
           ...this.headers,
-          'Depth': '0' // Header to only check the target resource, not children
+          'Depth': '0'
         },
+        credentials: 'omit'
       });
 
       // Some servers might return 405 Method Not Allowed for PROPFIND on files, 
@@ -50,7 +60,7 @@ export class WebDavClient {
       // If PROPFIND fails, try a simple GET on a likely file (index.json) or just check if auth passed
       if (!response.ok && response.status !== 207) {
         // Fallback check
-        const getRes = await fetch(`${this.url}/inkread_data.json`, { method: 'HEAD', headers: this.headers });
+        const getRes = await fetch(`${this.url}/inkread_data.json`, { method: 'HEAD', headers: this.headers, credentials: 'omit' });
         if (getRes.status === 401) throw new Error("Unauthorized");
         // If 404, it might just mean file doesn't exist yet, but connection is OK if not 401
       }
@@ -67,6 +77,7 @@ export class WebDavClient {
       const response = await fetch(`${this.url}/${filename}`, {
         method: 'GET',
         headers: this.headers,
+        credentials: 'omit'
       });
 
       if (response.status === 404) return null;
@@ -88,6 +99,7 @@ export class WebDavClient {
           'Content-Type': 'application/json',
         },
         body: content,
+        credentials: 'omit'
       });
 
       if (!response.ok) throw new Error(`WebDAV PUT failed: ${response.statusText}`);
@@ -148,5 +160,40 @@ export const syncData = async (): Promise<string> => {
   } else {
     // 时间戳相同，无需同步
     return "已是最新";
+  }
+};
+
+// 手动上传数据到云端
+export const uploadData = async (): Promise<string> => {
+  const settings = getSettings();
+  if (!settings.webdav_url) return "未配置 WebDAV";
+
+  try {
+    const client = new WebDavClient(settings);
+    const localBackup = createBackup();
+    await client.putFile('inkread_data.json', localBackup);
+    return "上传成功";
+  } catch (error: any) {
+    return `上传失败: ${error.message}`;
+  }
+};
+
+// 手动从云端下载数据
+export const downloadData = async (): Promise<string> => {
+  const settings = getSettings();
+  if (!settings.webdav_url) return "未配置 WebDAV";
+
+  try {
+    const client = new WebDavClient(settings);
+    const cloudBackupStr = await client.getFile('inkread_data.json');
+
+    if (!cloudBackupStr) {
+      return "云端无数据";
+    }
+
+    await restoreBackup(cloudBackupStr);
+    return "下载成功";
+  } catch (error: any) {
+    return `下载失败: ${error.message}`;
   }
 };
