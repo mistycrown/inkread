@@ -1,169 +1,240 @@
-import { getSettings, getIndex, saveIndex, rawReadFile, rawWriteFile, getAllArticleFiles, createBackup, restoreBackup } from './storageService';
-import { IndexFile, AppSettings } from '../types';
+import { getSettings, createBackup, restoreBackup } from './storageService';
+import { AppSettings } from '../types';
+import { Capacitor } from '@capacitor/core';
+import { HTTP } from '@awesome-cordova-plugins/http';
 
-// Simple Buffer for Basic Auth encoding in browser
-const toBase64 = (str: string) => window.btoa(str);
+// Base64 编码工具
+const toBase64 = (str: string) => {
+  if (typeof window !== 'undefined' && window.btoa) {
+    return window.btoa(str);
+  }
+  return Buffer.from(str).toString('base64');
+};
 
+/**
+ * WebDAV 客户端类 - 支持 Web 和 Android/iOS 原生平台
+ * 参考 LumosTime 的成功实现
+ */
 export class WebDavClient {
   private url: string;
-  private headers: HeadersInit;
+  private originalUrl: string;
+  private username: string;
+  private password: string;
+  private isNative: boolean;
 
   constructor(settings: AppSettings) {
     if (!settings.webdav_url || !settings.webdav_user || !settings.webdav_password) {
-      throw new Error("Missing WebDAV configuration");
+      throw new Error("缺少 WebDAV 配置");
     }
 
-    // 在开发环境使用代理避免 CORS 问题
-    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    this.username = settings.webdav_user;
+    this.password = settings.webdav_password;
+    this.originalUrl = settings.webdav_url.replace(/\/$/, '');
+    this.isNative = Capacitor.isNativePlatform();
+    this.url = this.getEffectiveUrl(this.originalUrl);
 
-    if (isDev) {
-      // 使用本地代理路径
-      this.url = '/webdav-proxy' + new URL(settings.webdav_url).pathname.replace(/\/$/, '');
-    } else {
-      // 生产环境直接使用配置的 URL
-      this.url = settings.webdav_url.replace(/\/$/, '');
-    }
-
-    this.headers = {
-      'Authorization': `Basic ${toBase64(`${settings.webdav_user}:${settings.webdav_password}`)}`,
-    };
-
-    // 调试信息
-    console.log('WebDAV Client 初始化:', {
-      '原始URL': settings.webdav_url,
-      '实际URL': this.url,
-      '用户名': settings.webdav_user,
-      '是否开发环境': isDev,
-      'Authorization头': this.headers.Authorization
+    console.log('[WebDAV] 客户端初始化:', {
+      平台: this.isNative ? 'Native (Android/iOS)' : 'Web',
+      URL: this.url
     });
   }
 
+  private getEffectiveUrl(url: string): string {
+    if (this.isNative) {
+      return url;
+    }
+
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isDev && url.includes('dav.jianguoyun.com')) {
+      return '/webdav-proxy' + new URL(url).pathname.replace(/\/$/, '');
+    }
+
+    return url;
+  }
+
+  /**
+   * 测试连接 - 参考 LumosTime 的实现
+   */
   async testConnection(): Promise<boolean> {
-    try {
-      // Try to list the directory or get index.json
-      // Using PROPFIND method usually checks directory access, but GET on root or index is safer for simple check
-      const response = await fetch(`${this.url}/`, {
-        method: 'PROPFIND',
-        headers: {
-          ...this.headers,
-          'Depth': '0'
-        },
-        credentials: 'omit'
-      });
+    if (this.isNative) {
+      try {
+        const url = this.url.endsWith('/') ? this.url : this.url + '/';
+        const auth = toBase64(`${this.username}:${this.password}`);
 
-      // Some servers might return 405 Method Not Allowed for PROPFIND on files, 
-      // or 207 Multi-Status. 200 OK is also fine.
-      // 401 means Unauthorized (failed auth).
-      if (response.status === 401) throw new Error("Unauthorized: Check username/password");
-      if (response.status === 404) throw new Error("URL not found");
+        console.log('[WebDAV Native] 测试连接:', url);
 
-      // If PROPFIND fails, try a simple GET on a likely file (index.json) or just check if auth passed
-      if (!response.ok && response.status !== 207) {
-        // Fallback check
-        const getRes = await fetch(`${this.url}/inkread_data.json`, { method: 'HEAD', headers: this.headers, credentials: 'omit' });
-        if (getRes.status === 401) throw new Error("Unauthorized");
-        // If 404, it might just mean file doesn't exist yet, but connection is OK if not 401
+        const response = await HTTP.sendRequest(url, {
+          method: 'options',
+          headers: { 'Authorization': `Basic ${auth}` },
+          timeout: 10000
+        });
+
+        console.log('[WebDAV Native] 连接测试响应:', response.status);
+        return response.status === 200 || response.status === 204;
+      } catch (error: any) {
+        console.error('[WebDAV Native] 连接测试失败:', JSON.stringify(error));
+        return false;
       }
+    } else {
+      // Web 平台测试
+      try {
+        const response = await fetch(`${this.url}/`, {
+          method: 'PROPFIND',
+          headers: {
+            'Authorization': `Basic ${toBase64(`${this.username}:${this.password}`)}`,
+            'Depth': '0'
+          },
+          credentials: 'omit'
+        });
 
-      return true;
-    } catch (e: any) {
-      console.error("WebDAV Test Error", e);
-      throw e;
+        return response.ok || response.status === 207;
+      } catch (error) {
+        console.error('[WebDAV Web] 连接测试失败:', error);
+        return false;
+      }
     }
   }
 
-  async getFile(filename: string): Promise<string | null> {
-    try {
-      const response = await fetch(`${this.url}/${filename}`, {
-        method: 'GET',
-        headers: this.headers,
-        credentials: 'omit'
-      });
-
-      if (response.status === 404) return null;
-      if (!response.ok) throw new Error(`WebDAV GET failed: ${response.statusText}`);
-
-      return await response.text();
-    } catch (e) {
-      console.error(`Error reading ${filename}`, e);
-      throw e;
-    }
-  }
-
+  /**
+   * 上传数据 - 参考 LumosTime 的成功实现
+   */
   async putFile(filename: string, content: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.url}/${filename}`, {
-        method: 'PUT',
-        headers: {
-          ...this.headers,
-          'Content-Type': 'application/json',
-        },
-        body: content,
-        credentials: 'omit'
-      });
+    const url = this.url.endsWith('/') ? `${this.url}/${filename}` : `${this.url}/${filename}`;
 
-      if (!response.ok) throw new Error(`WebDAV PUT failed: ${response.statusText}`);
-    } catch (e) {
-      console.error(`Error writing ${filename}`, e);
-      throw e;
+    if (this.isNative) {
+      try {
+        console.log('[WebDAV Native] 开始上传:', url);
+        const auth = toBase64(`${this.username}:${this.password}`);
+
+        // 关键：使用 JSON 序列化器
+        await HTTP.setDataSerializer('json');
+
+        // 关键：数据必须是对象，不能是字符串
+        const data = JSON.parse(content);
+
+        const response = await HTTP.sendRequest(url, {
+          method: 'put',
+          data: data,  // 传递解析后的对象
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/json; charset=utf-8'  // 包含 charset
+          },
+          timeout: 30000
+        });
+
+        console.log('[WebDAV Native] 上传响应:', response.status);
+
+        if (response.status < 200 || response.status >= 300) {
+          throw new Error(`上传失败: HTTP ${response.status}`);
+        }
+      } catch (error: any) {
+        console.error('[WebDAV Native] 上传失败:', JSON.stringify(error));
+        throw new Error(error.error || error.message || '上传失败');
+      }
+    } else {
+      // Web 平台上传
+      try {
+        const response = await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Basic ${toBase64(`${this.username}:${this.password}`)}`,
+            'Content-Type': 'application/json'
+          },
+          body: content,
+          credentials: 'omit'
+        });
+
+        if (!response.ok) {
+          throw new Error(`上传失败: HTTP ${response.status}`);
+        }
+      } catch (error: any) {
+        console.error('[WebDAV Web] 上传失败:', error);
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * 下载数据 - 参考 LumosTime 的成功实现
+   */
+  async getFile(filename: string): Promise<string | null> {
+    const url = this.url.endsWith('/') ? `${this.url}/${filename}` : `${this.url}/${filename}`;
+
+    if (this.isNative) {
+      try {
+        console.log('[WebDAV Native] 开始下载:', url);
+        const auth = toBase64(`${this.username}:${this.password}`);
+
+        const response = await HTTP.sendRequest(url, {
+          method: 'get',
+          headers: { 'Authorization': `Basic ${auth}` },
+          timeout: 30000
+        });
+
+        console.log('[WebDAV Native] 下载响应:', response.status);
+
+        if (response.status === 404) {
+          return null;
+        }
+
+        if (response.status < 200 || response.status >= 300) {
+          throw new Error(`下载失败: HTTP ${response.status}`);
+        }
+
+        // 返回字符串内容
+        const content = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+        return content;
+      } catch (error: any) {
+        if (error.status === 404) {
+          return null;
+        }
+        console.error('[WebDAV Native] 下载失败:', JSON.stringify(error));
+        throw new Error(error.error || error.message || '下载失败');
+      }
+    } else {
+      // Web 平台下载
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Basic ${toBase64(`${this.username}:${this.password}`)}`
+          },
+          credentials: 'omit'
+        });
+
+        if (response.status === 404) {
+          return null;
+        }
+
+        if (!response.ok) {
+          throw new Error(`下载失败: HTTP ${response.status}`);
+        }
+
+        return await response.text();
+      } catch (error: any) {
+        console.error('[WebDAV Web] 下载失败:', error);
+        throw error;
+      }
     }
   }
 }
 
+/**
+ * 测试 WebDAV 连接
+ */
 export const testWebDavConnection = async (settings: AppSettings): Promise<string> => {
   try {
     const client = new WebDavClient(settings);
-    await client.testConnection();
-    return "连接成功！";
+    const success = await client.testConnection();
+    return success ? "连接成功！" : "连接失败";
   } catch (error: any) {
     return `连接失败: ${error.message}`;
   }
 };
 
-export const syncData = async (): Promise<string> => {
-  const settings = getSettings();
-  if (!settings.webdav_url) return "未配置 WebDAV";
-
-  const client = new WebDavClient(settings);
-
-  // 获取本地完整数据
-  const localBackup = createBackup();
-  const localData = JSON.parse(localBackup);
-  const localTimestamp = localData.timestamp;
-
-  // 1. 尝试获取云端数据
-  let cloudBackupStr: string | null = null;
-  try {
-    cloudBackupStr = await client.getFile('inkread_data.json');
-  } catch (e) {
-    return "连接失败";
-  }
-
-  // 2. 如果云端没有数据，直接上传
-  if (!cloudBackupStr) {
-    await client.putFile('inkread_data.json', localBackup);
-    return "首次上传完成";
-  }
-
-  // 3. 比较时间戳，决定上传还是下载
-  const cloudData = JSON.parse(cloudBackupStr);
-  const cloudTimestamp = cloudData.timestamp || 0;
-
-  if (localTimestamp > cloudTimestamp) {
-    // 本地更新，上传到云端
-    await client.putFile('inkread_data.json', localBackup);
-    return "上传完成";
-  } else if (localTimestamp < cloudTimestamp) {
-    // 云端更新，下载并合并
-    await restoreBackup(cloudBackupStr);
-    return "下载完成";
-  } else {
-    // 时间戳相同，无需同步
-    return "已是最新";
-  }
-};
-
-// 手动上传数据到云端
+/**
+ * 上传数据到云端
+ */
 export const uploadData = async (): Promise<string> => {
   const settings = getSettings();
   if (!settings.webdav_url) return "未配置 WebDAV";
@@ -178,7 +249,9 @@ export const uploadData = async (): Promise<string> => {
   }
 };
 
-// 手动从云端下载数据
+/**
+ * 从云端下载数据
+ */
 export const downloadData = async (): Promise<string> => {
   const settings = getSettings();
   if (!settings.webdav_url) return "未配置 WebDAV";
@@ -195,5 +268,42 @@ export const downloadData = async (): Promise<string> => {
     return "下载成功";
   } catch (error: any) {
     return `下载失败: ${error.message}`;
+  }
+};
+
+/**
+ * 智能同步数据
+ */
+export const syncData = async (): Promise<string> => {
+  const settings = getSettings();
+  if (!settings.webdav_url) return "未配置 WebDAV";
+
+  try {
+    const client = new WebDavClient(settings);
+    const localBackup = createBackup();
+    const localData = JSON.parse(localBackup);
+    const localTimestamp = localData.timestamp;
+
+    const cloudBackupStr = await client.getFile('inkread_data.json');
+
+    if (!cloudBackupStr) {
+      await client.putFile('inkread_data.json', localBackup);
+      return "首次上传完成";
+    }
+
+    const cloudData = JSON.parse(cloudBackupStr);
+    const cloudTimestamp = cloudData.timestamp || 0;
+
+    if (localTimestamp > cloudTimestamp) {
+      await client.putFile('inkread_data.json', localBackup);
+      return "上传完成";
+    } else if (localTimestamp < cloudTimestamp) {
+      await restoreBackup(cloudBackupStr);
+      return "下载完成";
+    } else {
+      return "已是最新";
+    }
+  } catch (error: any) {
+    return `同步失败: ${error.message}`;
   }
 };
