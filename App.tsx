@@ -6,13 +6,15 @@ import { Settings } from './pages/Settings';
 
 const App: React.FC = () => {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/article/:id" element={<Detail />} />
-        <Route path="/settings" element={<Settings />} />
-      </Routes>
-    </Router>
+    <div className="min-h-screen bg-[#F8F5E6]">
+      <Router>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/article/:id" element={<Detail />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </Router>
+    </div>
   );
 };
 
