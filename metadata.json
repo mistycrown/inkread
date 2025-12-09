@@ -1,0 +1,5 @@
+{
+  "name": "InkRead",
+  "description": "A 'Read Later' and Knowledge Base app with a paper-sketch aesthetic. Features local-first data, WebDAV sync, and AI processing for clipboard content.",
+  "requestFramePermissions": []
+}

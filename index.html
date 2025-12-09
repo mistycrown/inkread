@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-[#F8F5E6]">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InkRead</title>
+  <link rel="icon" type="image/png" href="/icon.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @font-face {
+      font-family: 'Patrick Hand';
+      src: url('/fonts/PatrickHand-Regular.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    html {
+      background-color: #F8F5E6;
+      min-height: 100%;
+    }
+
+    body {
+      font-family: 'Merriweather', serif;
+      color: #333;
+      background-color: #F8F5E6 !important;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+    }
+
+    #root {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .font-hand {
+      font-family: 'Patrick Hand', 'Comic Sans MS', cursive;
+    }
+  </style>
+</head>
+
+<body class="bg-[#F8F5E6] min-h-screen">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
+</html>
