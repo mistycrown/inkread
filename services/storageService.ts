@@ -190,7 +190,9 @@ export const getSettings = (): AppSettings => {
 
 export const saveSettings = (settings: AppSettings): void => {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  updateLastModified(); // Update timestamp on settings change
+  // Note: We do NOT update last_modified here. 
+  // Changing settings (like API keys) should not be considered a "data update" 
+  // that supersedes cloud data.
 };
 
 // Utilities for Sync Service

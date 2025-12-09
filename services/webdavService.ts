@@ -235,82 +235,165 @@ export const testWebDavConnection = async (settings: AppSettings): Promise<strin
 /**
  * 上传数据到云端
  */
+import { uploadDataToSupabase, downloadDataFromSupabase } from './supabaseService';
+
+// ... (existing WebDavClient class)
+
+/**
+ * Upload Data Dispatcher
+ */
 export const uploadData = async (): Promise<string> => {
   const settings = getSettings();
-  if (!settings.webdav_url) return "未配置 WebDAV";
 
+  if (settings.sync_provider === 'supabase') {
+    if (!settings.supabase_url || !settings.supabase_key) return "Supabase not configured";
+    return await uploadDataToSupabase(settings);
+  }
+
+  // Default to WebDAV
+  if (!settings.webdav_url) return "WebDAV not configured";
   try {
     const client = new WebDavClient(settings);
     const localBackup = createBackup();
     await client.putFile('inkread_data.json', localBackup);
-    return "上传成功";
+    return "WebDAV Upload Success";
   } catch (error: any) {
-    return `上传失败: ${error.message}`;
+    return `WebDAV Upload Failed: ${error.message}`;
   }
 };
 
 /**
- * 从云端下载数据
+ * Download Data Dispatcher
  */
 export const downloadData = async (): Promise<string> => {
   const settings = getSettings();
-  if (!settings.webdav_url) return "未配置 WebDAV";
+
+  if (settings.sync_provider === 'supabase') {
+    if (!settings.supabase_url || !settings.supabase_key) return "Supabase not configured";
+    try {
+      const cloudData = await downloadDataFromSupabase(settings);
+      if (!cloudData) return "No data in Supabase";
+      await restoreBackup(cloudData);
+      return "Supabase Download Success";
+    } catch (e: any) {
+      return `Supabase Download Failed: ${e.message}`;
+    }
+  }
+
+  // Default to WebDAV
+  if (!settings.webdav_url) return "WebDAV not configured";
 
   try {
     const client = new WebDavClient(settings);
     const cloudBackupStr = await client.getFile('inkread_data.json');
 
     if (!cloudBackupStr) {
-      return "云端无数据";
+      return "No data in Cloud";
     }
 
     await restoreBackup(cloudBackupStr);
-    return "下载成功";
+    return "WebDAV Download Success";
   } catch (error: any) {
-    return `下载失败: ${error.message}`;
+    return `WebDAV Download Failed: ${error.message}`;
   }
 };
 
+
 /**
- * 智能同步数据
+ * Smart Sync Dispatcher
  */
 export const syncData = async (): Promise<string> => {
   const settings = getSettings();
-  if (!settings.webdav_url) return "未配置 WebDAV";
+
+  // Helper to detect empty local state (fresh install)
+  const isLocalEmpty = (backupJson: string) => {
+    try {
+      const data = JSON.parse(backupJson);
+      return (!data.index || !data.index.items || data.index.items.length === 0);
+    } catch (e) { return true; }
+  };
+
+  // --- SUPABASE SYNC ---
+  if (settings.sync_provider === 'supabase') {
+    if (!settings.supabase_url || !settings.supabase_key) return "Supabase not configured";
+    try {
+      const localBackup = createBackup();
+      const localData = JSON.parse(localBackup);
+      const localTimestamp = localData.timestamp;
+      const localIsEmpty = isLocalEmpty(localBackup);
+
+      const cloudBackupStr = await downloadDataFromSupabase(settings);
+
+      if (!cloudBackupStr) {
+        // Cloud is empty, upload local
+        await uploadDataToSupabase(settings);
+        return "First Upload (Cloud Empty)";
+      }
+
+      const cloudData = JSON.parse(cloudBackupStr);
+      const cloudTimestamp = cloudData.timestamp || 0;
+
+      // Logic Fix: If local is empty but cloud has data, ALWAYS download.
+      // This prevents a fresh install (timestamp=now) from overwriting cloud data.
+      if (localIsEmpty && cloudData.index?.items?.length > 0) {
+        await restoreBackup(cloudBackupStr);
+        return "Sync: Downloaded (Local was empty)";
+      }
+
+      console.log(`[Supabase Sync] Local: ${localTimestamp}, Cloud: ${cloudTimestamp}`);
+
+      if (localTimestamp > cloudTimestamp) {
+        await uploadDataToSupabase(settings);
+        return "Sync: Uploaded (Local newer)";
+      } else if (localTimestamp < cloudTimestamp) {
+        await restoreBackup(cloudBackupStr);
+        return "Sync: Downloaded (Cloud newer)";
+      } else {
+        return "Sync: Already up to date";
+      }
+    } catch (e: any) {
+      return `Sync Error: ${e.message}`;
+    }
+  }
+
+  // --- WEBDAV SYNC (Default) ---
+  if (!settings.webdav_url) return "WebDAV not configured";
 
   try {
     const client = new WebDavClient(settings);
     const localBackup = createBackup();
     const localData = JSON.parse(localBackup);
     const localTimestamp = localData.timestamp;
+    const localIsEmpty = isLocalEmpty(localBackup);
 
     const cloudBackupStr = await client.getFile('inkread_data.json');
 
     if (!cloudBackupStr) {
       await client.putFile('inkread_data.json', localBackup);
-      return "首次上传完成";
+      return "First Upload (Cloud Empty)";
     }
 
     const cloudData = JSON.parse(cloudBackupStr);
     const cloudTimestamp = cloudData.timestamp || 0;
 
-    console.log(`[Sync Debug] Local: ${localTimestamp} (${new Date(localTimestamp).toLocaleString()})`);
-    console.log(`[Sync Debug] Cloud: ${cloudTimestamp} (${new Date(cloudTimestamp).toLocaleString()})`);
-    console.log(`[Sync Debug] Delta: ${localTimestamp - cloudTimestamp}ms`);
+    // Logic Fix: If local is empty (and cloud isn't), ALWAYS download.
+    if (localIsEmpty && cloudData.index?.items?.length > 0) {
+      await restoreBackup(cloudBackupStr);
+      return "Sync: Downloaded (Local was empty)";
+    }
+
+    console.log(`[Sync Debug] Local: ${localTimestamp}, Cloud: ${cloudTimestamp}`);
 
     if (localTimestamp > cloudTimestamp) {
-      console.log('[Sync Debug] Local is newer -> Uploading');
       await client.putFile('inkread_data.json', localBackup);
-      return "上传完成";
+      return "Sync: Uploaded (Local newer)";
     } else if (localTimestamp < cloudTimestamp) {
-      console.log('[Sync Debug] Cloud is newer -> Downloading');
       await restoreBackup(cloudBackupStr);
-      return "下载完成";
+      return "Sync: Downloaded (Cloud newer)";
     } else {
-      console.log('[Sync Debug] Timestamps match -> No action');
-      return "已是最新";
+      return "Sync: Already up to date";
     }
   } catch (error: any) {
-    return `同步失败: ${error.message}`;
+    return `Sync Failed: ${error.message}`;
   }
 };

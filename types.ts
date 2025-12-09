@@ -44,12 +44,17 @@ export interface AppSettings {
   webdav_url?: string;
   webdav_user?: string;
   webdav_password?: string;
-  
+
+  // Sync Settings
+  sync_provider?: 'webdav' | 'supabase';
+  supabase_url?: string;
+  supabase_key?: string;
+
   // AI Settings
   openai_api_key?: string;
   openai_base_url?: string; // e.g. https://api.openai.com/v1
   openai_model?: string;    // e.g. gpt-4o, gpt-3.5-turbo
-  
+
   // Prompt Templates
   prompt_templates: PromptTemplate[];
 }

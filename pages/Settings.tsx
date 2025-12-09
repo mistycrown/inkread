@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSettings, saveSettings, createBackup, restoreBackup } from '../services/storageService';
 import { testWebDavConnection, uploadData, downloadData } from '../services/webdavService';
+import { testSupabaseConnection } from '../services/supabaseService';
 import { testOpenAIConnection } from '../services/aiService';
 import { AppSettings, PromptTemplate } from '../types';
 import { SketchButton, SketchInput, SketchTextArea } from '../components/SketchComponents';
@@ -59,8 +60,16 @@ export const Settings: React.FC = () => {
         setIsTesting(true);
         setTestResult(null);
         try {
-            const msg = await testWebDavConnection(formData);
-            if (msg.includes("成功")) {
+            let msg;
+            if (formData.sync_provider === 'supabase') {
+                msg = await testSupabaseConnection(formData);
+            } else {
+                msg = await testWebDavConnection(formData);
+            }
+
+            // Check for success keywords: "成功", "success", or "verified"
+            const lowerMsg = msg.toLowerCase();
+            if (lowerMsg.includes("成功") || lowerMsg.includes("success") || lowerMsg.includes("verified")) {
                 setTestResult({ msg, isError: false });
             } else {
                 setTestResult({ msg, isError: true });
@@ -93,7 +102,8 @@ export const Settings: React.FC = () => {
         setSyncResult(null);
         try {
             const msg = await uploadData();
-            if (msg.includes("成功")) {
+            const lowerMsg = msg.toLowerCase();
+            if (lowerMsg.includes("成功") || lowerMsg.includes("success")) {
                 setSyncResult({ msg, isError: false });
             } else {
                 setSyncResult({ msg, isError: true });
@@ -113,7 +123,8 @@ export const Settings: React.FC = () => {
         setSyncResult(null);
         try {
             const msg = await downloadData();
-            if (msg.includes("成功")) {
+            const lowerMsg = msg.toLowerCase();
+            if (lowerMsg.includes("成功") || lowerMsg.includes("success")) {
                 setSyncResult({ msg, isError: false });
                 // 下载成功后刷新页面以显示新数据
                 setTimeout(() => window.location.reload(), 1000);
@@ -223,34 +234,95 @@ export const Settings: React.FC = () => {
 
                 <div className="space-y-8">
                     <section>
-                        <h2 className="text-xl font-bold border-b-2 border-zinc-800 mb-4 inline-block">WebDAV Sync</h2>
+
+                        <h2 className="text-xl font-bold border-b-2 border-zinc-800 mb-4 inline-block">Data Sync</h2>
                         <div className="space-y-4">
-                            <div>
-                                <label className="block font-hand text-zinc-600 mb-1">Server URL</label>
-                                <SketchInput
-                                    name="webdav_url"
-                                    value={formData.webdav_url || ''}
-                                    onChange={handleChange}
-                                    placeholder="https://dav.example.com/inkread"
-                                />
+                            {/* Provider Toggle */}
+                            <div className="flex gap-4 mb-4">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="sync_provider"
+                                        value="webdav"
+                                        checked={formData.sync_provider !== 'supabase'} // Default to WebDAV
+                                        onChange={() => setFormData({ ...formData, sync_provider: 'webdav' })}
+                                        className="w-4 h-4 accent-zinc-900"
+                                    />
+                                    <span className="font-hand font-bold">WebDAV</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="sync_provider"
+                                        value="supabase"
+                                        checked={formData.sync_provider === 'supabase'}
+                                        onChange={() => setFormData({ ...formData, sync_provider: 'supabase' })}
+                                        className="w-4 h-4 accent-zinc-900"
+                                    />
+                                    <span className="font-hand font-bold">Supabase</span>
+                                </label>
                             </div>
-                            <div>
-                                <label className="block font-hand text-zinc-600 mb-1">Username</label>
-                                <SketchInput
-                                    name="webdav_user"
-                                    value={formData.webdav_user || ''}
-                                    onChange={handleChange}
-                                />
-                            </div>
-                            <div>
-                                <label className="block font-hand text-zinc-600 mb-1">Password</label>
-                                <SketchInput
-                                    type="password"
-                                    name="webdav_password"
-                                    value={formData.webdav_password || ''}
-                                    onChange={handleChange}
-                                />
-                            </div>
+
+                            {formData.sync_provider === 'supabase' ? (
+                                <div className="space-y-4 animate-in fade-in slide-in-from-left-2">
+                                    <div className="bg-blue-50 p-3 rounded border border-blue-200 text-sm text-blue-800 mb-2">
+                                        <p className="font-bold">Setup Instructions:</p>
+                                        <ol className="list-decimal ml-4 space-y-1 mt-1">
+                                            <li>Create a project at <a href="https://supabase.com" target="_blank" rel="noreferrer" className="underline">supabase.com</a></li>
+                                            <li>Go to <b>Storage</b> and create a new bucket named <code>inkread</code></li>
+                                            <li>Make the bucket <b>Public</b> or set RLS policies to allow upload/download.</li>
+                                        </ol>
+                                    </div>
+                                    <div>
+                                        <label className="block font-hand text-zinc-600 mb-1">Project URL</label>
+                                        <SketchInput
+                                            name="supabase_url"
+                                            value={formData.supabase_url || ''}
+                                            onChange={handleChange}
+                                            placeholder="https://xyz.supabase.co"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block font-hand text-zinc-600 mb-1">Anon / Service Key</label>
+                                        <SketchInput
+                                            type="password"
+                                            name="supabase_key"
+                                            value={formData.supabase_key || ''}
+                                            onChange={handleChange}
+                                            placeholder="eyJh..."
+                                        />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4 animate-in fade-in slide-in-from-left-2">
+                                    <div>
+                                        <label className="block font-hand text-zinc-600 mb-1">Server URL</label>
+                                        <SketchInput
+                                            name="webdav_url"
+                                            value={formData.webdav_url || ''}
+                                            onChange={handleChange}
+                                            placeholder="https://dav.example.com/inkread"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block font-hand text-zinc-600 mb-1">Username</label>
+                                        <SketchInput
+                                            name="webdav_user"
+                                            value={formData.webdav_user || ''}
+                                            onChange={handleChange}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block font-hand text-zinc-600 mb-1">Password</label>
+                                        <SketchInput
+                                            type="password"
+                                            name="webdav_password"
+                                            value={formData.webdav_password || ''}
+                                            onChange={handleChange}
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex flex-col gap-3 mt-2">
                                 <div className="flex justify-start">

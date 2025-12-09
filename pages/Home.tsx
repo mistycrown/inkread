@@ -3,10 +3,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Clipboard } from '@capacitor/clipboard';
 import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { getIndex, saveArticle, searchLocalArticles, toggleArticleStatus } from '../services/storageService';
 import { syncData } from '../services/webdavService';
 import { IndexItem, SyncStatus } from '../types';
 import { SketchButton, SketchCard, SketchInput, SketchTextArea } from '../components/SketchComponents';
+import { Toast } from '../components/Notifications';
 
 // Simple UUID Generator for browser env
 const generateUUID = () => {
@@ -35,6 +37,7 @@ export const Home: React.FC = () => {
     // Manual Input State
     const [isManualMode, setIsManualMode] = useState(false);
     const [manualContent, setManualContent] = useState('');
+    const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
     const loadItems = () => {
         const index = getIndex();
@@ -121,26 +124,124 @@ export const Home: React.FC = () => {
         setCurrentView('inbox'); // Switch to inbox to see new item
     };
 
-    const handleCapture = async () => {
-        // 1. Attempt to read clipboard
-        try {
-            if (!navigator.clipboard || !navigator.clipboard.readText) {
-                throw new Error("Clipboard API unavailable");
-            }
 
-            const text = await navigator.clipboard.readText();
+
+    // Auto-read Clipboard on Resume
+    useEffect(() => {
+        let listenerHandle: any = null;
+
+        const setupListener = async () => {
+            listenerHandle = await CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
+                if (isActive) {
+                    console.log('App resumed, checking clipboard...');
+                    await checkClipboardAndPrompt();
+                }
+            });
+        };
+
+        setupListener();
+        // Also check once on mount (for cold start), slightly delayed to ensure ready
+        setTimeout(checkClipboardAndPrompt, 1000);
+
+        return () => {
+            if (listenerHandle) {
+                listenerHandle.remove();
+            }
+        };
+    }, []);
+
+    const checkClipboardAndPrompt = async () => {
+        try {
+            // Priority: Capacitor Plugin -> Web API
+            let text = '';
+            try {
+                const { value } = await Clipboard.read();
+                text = value;
+            } catch (nativeErr) {
+                // Fallback to web (might fail without user gesture)
+                /* Web API usually requires focus/gesture, so silent read might fail here. 
+                   We ignore error in silent mode. */
+            }
 
             if (text && text.trim().length > 0) {
-                // 2a. Success: Create entry immediately
-                createEntry(text);
-            } else {
-                // 2b. Empty Clipboard: Show Manual Input
-                setIsManualMode(true);
+                // Logic to avoid annoying user:
+                // Only open if we are NOT already editing
+                // We can also check if text is significantly different or new?
+                // For now, let's just pre-fill if ManualMode is OFF.
+
+                // Note: We need to access the LATEST state value of isManualMode.
+                // Since we are in a closure, we might need a ref or functional update.
+                // Simpler approach: Just check if we are already in manual mode? 
+                // Actually, let's interact with state carefully.
+
+                setManualContent((prev) => {
+                    // Only update if empty or override? 
+                    // Let's simply set it and prompt user.
+                    if (!prev) return text;
+                    return prev;
+                });
+                setIsManualMode((prev) => {
+                    if (!prev) {
+                        // If modal was closed, open it with new text
+                        // We might want a "New Content Detected" toast instead?
+                        // The user requested "Auto Read". Opening the modal is a good feedback.
+                        return true;
+                    }
+                    return prev;
+                });
             }
         } catch (err) {
-            // 3. Error/Denied: Show Manual Input
-            console.warn("Clipboard access denied or failed, switching to manual input.", err);
+            console.log('Silent clipboard check failed', err);
+        }
+    };
+
+    const handleCapture = async () => {
+        try {
+            let text = '';
+
+            // 1. Try Capacitor Native Clipboard first with Timeout
+            try {
+                // Create a timeout promise to safely handle potential hangs
+                const timeoutPromise = new Promise<{ value: string, type: string }>((_, reject) => {
+                    setTimeout(() => reject(new Error('Native Clipboard Timeout')), 2000);
+                });
+
+                // Race between actual read and timeout
+                const result = await Promise.race([
+                    Clipboard.read(),
+                    timeoutPromise
+                ]) as { value: string, type: string };
+
+                text = result.value;
+            } catch (nativeErr: any) {
+                console.warn("Native clipboard failed:", nativeErr);
+
+                // 2. Fallback to Web API
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    try {
+                        text = await navigator.clipboard.readText();
+                    } catch (webErr: any) {
+                        console.warn("Web Clipboard failed:", webErr);
+                    }
+                }
+            }
+
+            console.log("Clipboard text:", text);
+
+            if (text && text.trim().length > 0) {
+                // Success
+                createEntry(text);
+                setToast({ message: "Scrap created from clipboard!", type: 'success' });
+            } else {
+                // Empty
+                setIsManualMode(true);
+                setToast({ message: "Clipboard was empty", type: 'info' });
+            }
+        } catch (err: any) {
+            // General Error
+            console.warn("Capture process failed:", err);
             setIsManualMode(true);
+            setToast({ message: "Clipboard access failed", type: 'error' });
         }
     };
 
@@ -158,11 +259,20 @@ export const Home: React.FC = () => {
             console.log(msg);
             setSyncStatus(SyncStatus.SUCCESS);
             setSyncMessage(msg);
-            loadItems();
-            setTimeout(() => {
-                setSyncStatus(SyncStatus.IDLE);
-                setSyncMessage('');
-            }, 3000);
+
+            // If we downloaded data, force a reload to ensure fresh UI
+            const lowerMsg = msg.toLowerCase();
+            if (lowerMsg.includes("download") || lowerMsg.includes("下载")) {
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else {
+                loadItems();
+                setTimeout(() => {
+                    setSyncStatus(SyncStatus.IDLE);
+                    setSyncMessage('');
+                }, 3000);
+            }
         } catch (e: any) {
             console.error(e);
             setSyncStatus(SyncStatus.ERROR);
