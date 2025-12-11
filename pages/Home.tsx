@@ -16,6 +16,7 @@ const generateUUID = () => {
 };
 
 const ITEMS_PER_PAGE = 10;
+let hasAutoSynced = false;
 
 export const Home: React.FC = () => {
     const navigate = useNavigate();
@@ -315,6 +316,16 @@ export const Home: React.FC = () => {
             }, 5000);
         }
     };
+
+    // Auto-sync on app launch (once per session)
+    useEffect(() => {
+        if (!hasAutoSynced) {
+            console.log("App launch detected, executing auto-sync...");
+            hasAutoSynced = true;
+            handleSync();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const toggleTag = (tag: string) => {
         // If we are searching for this tag, clear search
